@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+  <title>保存機能テスト</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px 16px;
+      font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+      background: linear-gradient(180deg, #2a1768, #7652d8);
+      color: #35245d;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto;
+      padding: 28px 20px;
+      background: #ffffff;
+      border-radius: 22px;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+      text-align: center;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: 23px;
+      color: #4d2fa4;
+    }
+
+    .description {
+      margin-bottom: 22px;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .result {
+      margin: 18px 0;
+      padding: 18px 12px;
+      border-radius: 16px;
+      background: #f5f0ff;
+      border: 1px solid #d9ccff;
+      font-size: 14px;
+      line-height: 1.8;
+      word-break: break-all;
+    }
+
+    .not-saved {
+      color: #a84c73;
+    }
+
+    .saved {
+      color: #4d2fa4;
+      font-weight: bold;
+    }
+
+    button {
+      display: block;
+      width: 100%;
+      margin-top: 12px;
+      padding: 15px 12px;
+      border: 0;
+      border-radius: 999px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .save-button {
+      background: linear-gradient(135deg, #7652d8, #aa82ff);
+      color: #ffffff;
+    }
+
+    .clear-button {
+      background: #f3eefc;
+      color: #7259a8;
+    }
+
+    .note {
+      margin-top: 22px;
+      font-size: 12px;
+      line-height: 1.7;
+      color: #776b8f;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="card">
+    <h1>保存機能テスト</h1>
+
+    <div class="description">
+      「テスト結果を保存」を押したあと、<br>
+      一度このページを閉じてください。<br><br>
+
+      再びニュースから同じページを開き、<br>
+      保存内容が表示されるか確認します。
+    </div>
+
+    <div id="result" class="result"></div>
+
+    <button
+      type="button"
+      class="save-button"
+      onclick="saveTestResult()"
+    >
+      テスト結果を保存
+    </button>
+
+    <button
+      type="button"
+      class="clear-button"
+      onclick="clearTestResult()"
+    >
+      保存内容を削除
+    </button>
+
+    <div class="note">
+      保存内容が再表示されれば、抽選結果や参加コードも
+      同じ方法で保存できる可能性があります。
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "clearLotteryStorageTest_v1";
+
+    function createTestCode() {
+      const randomNumber = Math.floor(1000 + Math.random() * 9000);
+      return `TEST-${randomNumber}`;
+    }
+
+    function saveTestResult() {
+      try {
+        const data = {
+          code: createTestCode(),
+          savedAt: new Date().toLocaleString("ja-JP")
+        };
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        showSavedResult(data);
+
+        alert(
+          "保存しました。\n" +
+          "一度このページを閉じて、ニュースからもう一度開いてください。"
+        );
+      } catch (error) {
+        console.error(error);
+
+        document.getElementById("result").innerHTML =
+          '<span class="not-saved">保存に失敗しました。<br>' +
+          "アプリ内ブラウザで保存機能が制限されている可能性があります。</span>";
+      }
+    }
+
+    function loadTestResult() {
+      try {
+        const savedData = localStorage.getItem(STORAGE_KEY);
+
+        if (!savedData) {
+          showNotSaved();
+          return;
+        }
+
+        const data = JSON.parse(savedData);
+        showSavedResult(data);
+      } catch (error) {
+        console.error(error);
+        showNotSaved();
+      }
+    }
+
+    function showSavedResult(data) {
+      document.getElementById("result").innerHTML = `
+        <div class="saved">
+          保存内容が確認できました
+        </div>
+        <br>
+        テストコード：${escapeHtml(data.code)}<br>
+        保存日時：${escapeHtml(data.savedAt)}
+      `;
+    }
+
+    function showNotSaved() {
+      document.getElementById("result").innerHTML = `
+        <span class="not-saved">
+          現在、保存済みの内容はありません。
+        </span>
+      `;
+    }
+
+    function clearTestResult() {
+      localStorage.removeItem(STORAGE_KEY);
+      showNotSaved();
+      alert("保存内容を削除しました。");
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    loadTestResult();
+  </script>
+</body>
+</html>
