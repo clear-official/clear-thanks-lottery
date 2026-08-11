@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "clearSummerLoveFestivalResultV3";
+  const STORAGE_KEY = "clearSummerLoveFestivalRedrawResultV1";
   const DEVICE_ID_KEY = "clearSummerLoveFestivalDeviceIdV1";
   const API_URL = "https://script.google.com/macros/s/AKfycbz_iA0cuy_ynSgivpZk-AF6evYIBVSEQXUvMC-MwFDOxT27T-9bbsjFZ1aijBwELpRRUw/exec";
   const USER_ID_PARAM = "uid";
@@ -15,8 +15,8 @@
     LOADING: "LOADING",
     BEFORE_EVENT: "BEFORE_EVENT",
     DRAW_OPEN: "DRAW_OPEN",
-    RESULT_ONLY: "RESULT_ONLY",
-    CLOSED: "CLOSED",
+    RESULT_VIEW: "RESULT_VIEW",
+    ENDED: "ENDED",
     ERROR: "ERROR"
   });
 
@@ -90,7 +90,8 @@
     dates: null,
     serverTimeMs: null,
     receivedAtMs: null,
-    message: "開催状況を確認しています…"
+    message: "開催状況を確認しています…",
+    eligibility: null
   };
 
   function readStoredResult() {
@@ -199,7 +200,11 @@
   }
 
   async function requestHealth() {
-    const payload = await requestJsonp({ action: "health" });
+    const payload = await requestJsonp({
+      action: "health",
+      deviceId: getOrCreateDeviceId(),
+      userId: getUserIdFromUrl()
+    });
     if (!payload?.ok || !payload.phase) {
       throw new Error(payload?.error?.message || "開催状況を確認できませんでした。");
     }
@@ -232,7 +237,22 @@
     confirmDescription.replaceChildren(paragraph);
   }
 
+  function showExcludedModal(eligibility) {
+    lastFocusedElement = document.activeElement;
+    confirmTitle.textContent = eligibility?.title || "今回は抽選対象外となります";
+    setConfirmMessage(
+      eligibility?.message ||
+      "前回ご当選時のお手続きが期限内に確認できなかったため、今回の再抽選にはご参加いただけません。ご了承くださいませ。"
+    );
+    startLotteryButton.hidden = true;
+    startLotteryButton.disabled = true;
+    modal.classList.add("is-open");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("is-modal-open");
+  }
+
   function configureConfirmModal(mode, message = "") {
+    startLotteryButton.hidden = false;
     if (mode === "result") {
       confirmTitle.textContent = "抽選結果を確認します";
       setConfirmMessage(message || "抽選期間中に利用した端末の結果を確認します。");
@@ -246,14 +266,18 @@
   }
 
   function entryButtonState(hasResult) {
+    if (eventState.eligibility?.eligible === false) {
+      return { label: "今回は抽選対象外です", disabled: true };
+    }
+
     switch (eventState.phase) {
       case EVENT_PHASES.BEFORE_EVENT:
-        return { label: "8月1日（土）0:00から開始", disabled: true };
+        return { label: "8月11日（火）15:00から開始", disabled: true };
       case EVENT_PHASES.DRAW_OPEN:
         return { label: hasResult ? "抽選結果を確認" : "抽選へ進む", disabled: false };
-      case EVENT_PHASES.RESULT_ONLY:
-        return { label: "結果を見る", disabled: false };
-      case EVENT_PHASES.CLOSED:
+      case EVENT_PHASES.RESULT_VIEW:
+        return { label: hasResult ? "結果を見る" : "抽選受付は終了しました", disabled: !hasResult };
+      case EVENT_PHASES.ENDED:
         return { label: "イベントは終了しました", disabled: true };
       case EVENT_PHASES.ERROR:
         return { label: "開催状況を確認できません", disabled: true };
@@ -277,7 +301,7 @@
       eventPhaseNotice.dataset.phase = eventState.phase;
     }
 
-    if (modal.classList.contains("is-open") && ![EVENT_PHASES.DRAW_OPEN, EVENT_PHASES.RESULT_ONLY].includes(eventState.phase)) {
+    if (modal.classList.contains("is-open") && ![EVENT_PHASES.DRAW_OPEN, EVENT_PHASES.RESULT_VIEW].includes(eventState.phase)) {
       startLotteryButton.disabled = true;
       startLotteryButton.textContent = state.label;
     }
@@ -295,19 +319,27 @@
         dates: payload.dates || null,
         serverTimeMs: Date.parse(payload.serverTime),
         receivedAtMs: Date.now(),
+        eligibility: payload.eligibility || { eligible: true },
         message:
-          payload.phase === EVENT_PHASES.BEFORE_EVENT
-            ? "8月1日（土）0:00から参加できます。"
-            : payload.phase === EVENT_PHASES.DRAW_OPEN
-              ? "ガラポン抽選を開催中です。"
-              : payload.phase === EVENT_PHASES.RESULT_ONLY
-                ? "抽選期間は終了しました。8月5日（水）23:59:59まで結果を確認できます。"
-                : "イベントは終了しました。"
+          payload.eligibility?.eligible === false
+            ? "今回は再抽選の対象外となります。"
+            : payload.phase === EVENT_PHASES.BEFORE_EVENT
+              ? "8月11日（火）15:00から参加できます。"
+              : payload.phase === EVENT_PHASES.DRAW_OPEN
+                ? "ガラポン再抽選を開催中です。"
+                : payload.phase === EVENT_PHASES.RESULT_VIEW
+                  ? "抽選受付は終了しました。抽選済みの方は8月14日（金）15:00まで結果を確認できます。"
+                  : "イベントは終了しました。"
       };
       applyEventPhaseUi();
 
+      if (payload.eligibility?.eligible === false) {
+        window.setTimeout(() => showExcludedModal(payload.eligibility), 120);
+        return;
+      }
+
       const storedResult = readStoredResult();
-      if (openStoredResult && storedResult && [EVENT_PHASES.DRAW_OPEN, EVENT_PHASES.RESULT_ONLY].includes(eventState.phase)) {
+      if (openStoredResult && storedResult && [EVENT_PHASES.DRAW_OPEN, EVENT_PHASES.RESULT_VIEW].includes(eventState.phase)) {
         window.setTimeout(() => openResultScreen(storedResult), 120);
       }
     } catch (error) {
@@ -316,7 +348,8 @@
         dates: null,
         serverTimeMs: null,
         receivedAtMs: Date.now(),
-        message: "開催状況を確認できません。通信環境を確認してページを再読み込みしてください。"
+        message: "開催状況を確認できません。通信環境を確認してページを再読み込みしてください。",
+        eligibility: null
       };
       applyEventPhaseUi();
       trackEvent("event_health_error", { error_message: error?.message || "unknown_error" });
@@ -335,8 +368,8 @@
 
   const RESULT_DETAILS = Object.freeze({
     P01: {
-      title: "日本でも著名な縁結び神社⛩️\n難波八阪神社\n恋みくじ＋縁結びおまもり",
-      message: "難波八阪神社の恋みくじと縁結びおまもりをセットでお届けします🎁\n※恋みくじ・おまもりの種類はランダムです。",
+      title: "日本でも著名な縁結び神社⛩️\n難波八阪神社\n恋鯉みくじ＋縁結びおまもり",
+      message: "難波八阪神社の恋鯉みくじと縁結びおまもりをセットでお届けします🎁\n※恋みくじ・おまもりの種類はランダムです。",
       ria: "assets/ria-win.png"
     },
     P02: {
@@ -384,7 +417,21 @@
 
     const details = RESULT_DETAILS[apiResult.prizeId] || {};
     const isParticipation = apiResult.prizeId === "P00" || apiResult.prizeType === "参加賞";
-    const color = BALL_COLOR_MAP[apiResult.ballColor] || (isParticipation ? "pink" : "silver");
+    const PRIZE_COLOR_BY_ID = {
+      P01: "gold",
+      P02: "red",
+      P03: "purple",
+      P04: "blue",
+      P05: "white",
+      P06: "silver",
+      P07: "silver",
+      P08: "silver",
+      P00: "pink"
+    };
+    const color =
+      BALL_COLOR_MAP[apiResult.ballColor] ||
+      PRIZE_COLOR_BY_ID[apiResult.prizeId] ||
+      (isParticipation ? "pink" : "silver");
 
     return {
       drawId: apiResult.drawId || "",
@@ -423,6 +470,7 @@
         if (!payload?.ok) {
           const apiError = new Error(payload?.error?.message || "抽選処理に失敗しました。");
           apiError.code = payload?.error?.code || "API_ERROR";
+          apiError.title = payload?.error?.title || "";
           throw apiError;
         }
 
@@ -445,7 +493,7 @@
   }
 
   function openConfirmModal() {
-    if (![EVENT_PHASES.DRAW_OPEN, EVENT_PHASES.RESULT_ONLY].includes(eventState.phase)) {
+    if (![EVENT_PHASES.DRAW_OPEN, EVENT_PHASES.RESULT_VIEW].includes(eventState.phase)) {
       applyEventPhaseUi();
       return;
     }
@@ -457,8 +505,8 @@
     }
 
     lastFocusedElement = document.activeElement;
-    trackEvent(eventState.phase === EVENT_PHASES.RESULT_ONLY ? "result_lookup_open" : "lottery_confirm_open");
-    configureConfirmModal(eventState.phase === EVENT_PHASES.RESULT_ONLY ? "result" : "draw");
+    trackEvent(eventState.phase === EVENT_PHASES.RESULT_VIEW ? "result_lookup_open" : "lottery_confirm_open");
+    configureConfirmModal(eventState.phase === EVENT_PHASES.RESULT_VIEW ? "result" : "draw");
     startLotteryButton.disabled = false;
     modal.classList.add("is-open");
     modal.setAttribute("aria-hidden", "false");
@@ -468,6 +516,7 @@
 
   function closeConfirmModal() {
     modal.classList.remove("is-open");
+    startLotteryButton.hidden = false;
     modal.setAttribute("aria-hidden", "true");
     document.body.classList.remove("is-modal-open");
     if (lastFocusedElement instanceof HTMLElement) lastFocusedElement.focus();
@@ -692,6 +741,16 @@
       resetLotteryAnimation();
 
       if (!isRetryableConnectionError(lotteryApiError)) {
+        if (lotteryApiError?.code === "REDRAW_EXCLUDED") {
+          closeLotteryScreen();
+          showExcludedModal({
+            title: lotteryApiError.title || "今回は抽選対象外となります",
+            message: lotteryApiError.message
+          });
+          refreshEventState();
+          return;
+        }
+
         nudgeStatus(errorMessage);
         refreshEventState();
         return;
@@ -776,9 +835,9 @@
       ? "当選しなかった方には、参加賞として10ptをプレゼントします🎁"
       : result.message;
     resultCodeLabel.textContent = isParticipation ? "プレゼントコード" : "参加コード";
-    resultCode.textContent = result.code || (isParticipation ? "KOIMATSURI" : "");
+    resultCode.textContent = result.code || (isParticipation ? "KOIMATURI2" : "");
     resultGuide.textContent = isParticipation
-      ? "マイページ ＞ キャンペーンコード入力でも受け取りが可能です。\n※受け取り期限：8/3（月）23:59"
+      ? "マイページ ＞ キャンペーンコード入力でも受け取りが可能です。\n※受け取り期限：8/14（金）24:00"
       : "景品・ポイントのお受け取りは、参加コードをコピーの上、お問い合わせ窓口までお送りください。";
 
     resultInvalidWarning.hidden = isParticipation;
@@ -826,7 +885,7 @@
     participationClaimButton.hidden = expired;
     resultGuide.textContent = expired
       ? "受け取り期限は終了しました。"
-      : "マイページ ＞ キャンペーンコード入力でも受け取りが可能です。\n※受け取り期限：8/3（月）23:59";
+      : "マイページ ＞ キャンペーンコード入力でも受け取りが可能です。\n※受け取り期限：8/14（金）24:00";
   }
 
   function updateEntryButtons(hasResult) {
@@ -870,6 +929,17 @@
 
       if (!isRetryableConnectionError(error)) {
         resetLotteryAnimation();
+
+        if (error?.code === "REDRAW_EXCLUDED") {
+          closeLotteryScreen();
+          showExcludedModal({
+            title: error.title || "今回は抽選対象外となります",
+            message: error.message
+          });
+          refreshEventState();
+          return;
+        }
+
         nudgeStatus(error?.message || "抽選結果を確認できませんでした。");
         refreshEventState();
         return;
@@ -939,7 +1009,7 @@
   closeButtons.forEach((button) => button.addEventListener("click", closeConfirmModal));
   returnButtons.forEach((button) => button.addEventListener("click", closeLotteryScreen));
   startLotteryButton.addEventListener("click", () => {
-    if (eventState.phase === EVENT_PHASES.RESULT_ONLY) {
+    if (eventState.phase === EVENT_PHASES.RESULT_VIEW) {
       lookupExistingResult();
       return;
     }
@@ -958,7 +1028,7 @@
   });
   participationClaimButton.addEventListener("click", () => trackEvent("participation_claim_click", {
     reward_point: 10,
-    present_code: "KOIMATSURI"
+    present_code: "KOIMATURI2"
   }));
   document.addEventListener("keydown", handleEscape);
   window.addEventListener("resize", updateMobileEntryBar);
